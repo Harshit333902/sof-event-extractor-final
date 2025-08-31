@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Event Extractor – Accuracy Upgrade (v4)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans min-h-screen p-4">
+  <div class="mx-auto max-w-5xl bg-slate-800 rounded-2xl shadow-2xl p-6 border border-slate-700">
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-2xl font-bold text-indigo-400">PDF Event Extractor – v4 (Text-first, OCR fallback, Post-fix)</h1>
+        <p class="text-slate-400 text-sm mt-1">Designed for vessel Statements of Facts. More robust parsing, schema checks, and normalization.</p>
+      </div>
+      <div class="flex gap-2 items-center">
+        <label class="text-sm text-slate-300">Mode</label>
+        <select id="mode-select" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm">
+          <option value="auto" selected>Auto (Text → Vision)</option>
+          <option value="vision">Vision Only (images)</option>
+          <option value="text">Text Only</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 mt-6">
+      <div class="space-y-4">
+        <label class="block text-sm font-medium text-slate-300">Upload PDF Document</label>
+        <div id="drop-zone" class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-600 border-dashed rounded-md cursor-pointer hover:border-indigo-500 transition-colors">
+          <div class="space-y-1 text-center">
+            <svg class="mx-auto h-12 w-12 text-slate-500" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4V12a4 4 0 014-4h12l4 4h12a4 4 0 014 4z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <div class="flex text-sm text-slate-400"><p class="pl-1">Click to upload or drag and drop</p></div>
+            <p class="text-xs text-slate-500">PDF up to 20MB</p>
+            <p id="file-name" class="text-sm font-semibold text-indigo-400 pt-2"></p>
+          </div>
+        </div>
+        <input id="file-upload" name="file-upload" type="file" class="sr-only" accept=".pdf" />
+
+        <label class="block text-sm font-medium text-slate-300">Gemini API Key</label>
+        <input type="password" id="api-key-input" class="block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Enter your API key" />
+
+        <div class="flex items-center justify-between gap-3">
+          <label class="flex items-center gap-2 text-xs text-slate-400">
+            <input id="use-fewshot" type="checkbox" class="accent-indigo-500" checked>
+            Use few-shot guidance
+          </label>
+          <label class="flex items-center gap-2 text-xs text-slate-400">
+            <input id="strict-json" type="checkbox" class="accent-indigo-500" checked>
+            Strict JSON schema
+          </label>
+          <label class="flex items-center gap-2 text-xs text-slate-400">
+            <input id="temperature-zero" type="checkbox" class="accent-indigo-500" checked>
+            Temperature = 0
+          </label>
+        </div>
+
+        <button id="process-button" disabled class="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-slate-900">
+          <svg id="spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+          <span id="button-text">Extract Events</span>
+        </button>
+
+        <div id="error-message" class="hidden p-3 bg-red-900/50 text-red-300 border border-red-700 rounded-md text-sm"></div>
+      </div>
+
+      <div class="space-y-3">
+        <h2 class="text-lg font-semibold text-slate-200">Parsed Events</h2>
+        <div class="flex gap-3">
+          <button id="download-json" class="flex-1 py-2 px-4 bg-slate-700 hover:bg-slate-600 rounded-md text-sm font-medium">Download JSON</button>
+          <button id="download-csv" class="flex-1 py-2 px-4 bg-slate-700 hover:bg-slate-600 rounded-md text-sm font-medium">Download CSV</button>
+        </div>
+        <div class="overflow-x-auto bg-slate-900/50 rounded-lg border border-slate-700">
+          <table class="min-w-full divide-y divide-slate-700">
+            <thead class="bg-slate-800">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Date</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Start Time</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">End Time</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Description</th>
+            </tr>
+            </thead>
+            <tbody id="results-table-body" class="bg-slate-800/50 divide-y divide-slate-700"></tbody>
+          </table>
+        </div>
+        <div id="stats" class="text-xs text-slate-400"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Correct placement for pdf.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js";
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileUpload = document.getElementById('file-upload');
+    const fileNameDisplay = document.getElementById('file-name');
+    const apiKeyInput = document.getElementById('api-key-input');
+    const processButton = document.getElementById('process-button');
+    const buttonText = document.getElementById('button-text');
+    const spinner = document.getElementById('spinner');
+    const errorMessage = document.getElementById('error-message');
+    const resultsTableBody = document.getElementById('results-table-body');
+    const downloadJsonButton = document.getElementById('download-json');
+    const downloadCsvButton = document.getElementById('download-csv');
+    const stats = document.getElementById('stats');
+    const modeSelect = document.getElementById('mode-select');
+    const useFewshot = document.getElementById('use-fewshot');
+    const strictJson = document.getElementById('strict-json');
+    const temperatureZero = document.getElementById('temperature-zero');
+
+    let selectedFile = null;
+    let extractedEvents = [];
+
+    dropZone.addEventListener('click', () => fileUpload.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500'); });
+    dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('border-indigo-500'); });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500');
+      if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files[0]);
+    });
+    fileUpload.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFileSelect(e.target.files[0]); });
+    processButton.addEventListener('click', processPdf);
+    downloadJsonButton.addEventListener('click', () => {
+      if (extractedEvents.length > 0) downloadFile('extracted_events.json', JSON.stringify(extractedEvents, null, 2), 'application/json');
+    });
+    downloadCsvButton.addEventListener('click', () => {
+      if (extractedEvents.length > 0) downloadFile('extracted_events.csv', toCSV(extractedEvents), 'text/csv;charset=utf-8;');
+    });
+
+    function handleFileSelect(file) {
+      if (file && file.type === 'application/pdf') {
+        selectedFile = file;
+        fileNameDisplay.textContent = file.name;
+        processButton.disabled = false;
+        hideError();
+        resultsTableBody.innerHTML = '';
+        stats.textContent = '';
+      } else {
+        showError('Please select a valid PDF file.');
+        selectedFile = null;
+        fileNameDisplay.textContent = '';
+        processButton.disabled = true;
+      }
+    }
+
+    function setLoading(isLoading) {
+      spinner.classList.toggle('hidden', !isLoading);
+      buttonText.textContent = isLoading ? 'Processing...' : 'Extract Events';
+      processButton.disabled = isLoading;
+      fileUpload.disabled = isLoading;
+      apiKeyInput.disabled = isLoading;
+      modeSelect.disabled = isLoading;
+      useFewshot.disabled = isLoading;
+      strictJson.disabled = isLoading;
+      temperatureZero.disabled = isLoading;
+    }
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.classList.remove('hidden');
+    }
+
+    function hideError() { errorMessage.classList.add('hidden'); }
+
+    // === Core pipeline ===
+    async function processPdf() {
+      const apiKey = apiKeyInput.value.trim();
+      if (!selectedFile) { showError("No file selected."); return; }
+      if (!apiKey) { showError("Please enter your Gemini API Key."); return; }
+
+      setLoading(true); hideError();
+      extractedEvents = [];
+      const t0 = performance.now();
+
+      try {
+        const fileAsArrayBuffer = await selectedFile.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: fileAsArrayBuffer }).promise;
+
+        // Text-first strategy
+        const textMode = modeSelect.value === 'text';
+        const visionMode = modeSelect.value === 'vision';
+
+        const textPages = textMode || (!visionMode ? await extractTextPages(pdf) : []);
+        const totalChars = textPages.reduce((acc, t) => acc + t.text.length, 0);
+        const hasUsableText = totalChars > 200; // heuristic: if very low, likely scanned
+
+        let jsonArray = [];
+
+        if (!visionMode && hasUsableText) {
+          // 1) Send TEXT to LLM for structure (more accurate than images on digital PDFs)
+          const prompt = buildPrompt('text');
+          jsonArray = await callGemini(apiKey, [{ text: prompt }, { text: textPages.map(p => p.text).join('\n') }]);
+        } else {
+          // 2) Fallback to VISION: render pages to images (JPEG) with concurrency
+          const images = await renderAllPagesToImages(pdf);
+          const parts = [{ text: buildPrompt('vision') }, ...images.map(img => ({ inlineData: { mimeType: 'image/jpeg', data: img } }))];
+          jsonArray = await callGemini(apiKey, parts);
+        }
+
+        // 3) Post-processing normalization & hard rules
+        extractedEvents = postProcess(jsonArray);
+        displayResults(extractedEvents);
+
+        const t1 = performance.now();
+        stats.textContent = `Pages: ${pdf.numPages} | Text chars: ${totalChars} | Events: ${extractedEvents.length} | ${(t1 - t0).toFixed(0)} ms`;
+
+      } catch (err) {
+        console.error(err);
+        showError(`Error: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Extract per-page text (preserves reading order) and keep coordinates for potential future layout logic
+    async function extractTextPages(pdf) {
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        // group items into lines by Y with small tolerance
+        const lines = groupTextItemsByLine(content.items);
+        pages.push({ index: i, text: lines.join('\n') });
+      }
+      return pages;
+    }
+
+    function groupTextItemsByLine(items) {
+      const rows = [];
+      const tol = 2; // px tolerance for the same line
+      for (const it of items) {
+        const y = Math.round(it.transform[5]);
+        const row = rows.find(r => Math.abs(r.y - y) <= tol);
+        if (row) { row.text += it.str; } else { rows.push({ y, text: it.str }); }
+      }
+      // sort by y descending (pdf.js origin bottom-left), then return text
+      rows.sort((a, b) => b.y - a.y);
+      // add a space between items that pdf.js gives as individual glyphs
+      return rows.map(r => r.text.replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
+    }
+
+    // Render images with concurrency cap
+    async function renderAllPagesToImages(pdf) {
+      const tasks = [];
+      const scaleBase = pdf.numPages > 12 ? 1.5 : 2.0; // reduce scale for large docs
+      for (let i = 1; i <= pdf.numPages; i++) {
+        tasks.push(async () => {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: scaleBase });
+          const canvas = ('OffscreenCanvas' in window) ? new OffscreenCanvas(viewport.width, viewport.height) : document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!(canvas instanceof OffscreenCanvas)) { canvas.width = viewport.width; canvas.height = viewport.height; }
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const dataUrl = canvas.convertToBlob ? await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })).arrayBuffer() : dataURLFromCanvas(canvas);
+          if (canvas.convertToBlob) {
+            const base64 = arrayBufferToBase64(dataUrl);
+            return base64;
+          } else {
+            return dataUrl.split(',')[1];
+          }
+        });
+      }
+      return await runWithConcurrency(tasks, 3);
+    }
+
+    function dataURLFromCanvas(canvas) {
+      return canvas.toDataURL('image/jpeg', 0.9);
+    }
+
+    async function runWithConcurrency(fnArray, limit = 3) {
+      const results = new Array(fnArray.length);
+      let i = 0;
+      const workers = new Array(Math.min(limit, fnArray.length)).fill(0).map(async function worker() {
+        while (i < fnArray.length) {
+          const cur = i++;
+          results[cur] = await fnArray[cur]();
+        }
+      });
+      await Promise.all(workers);
+      return results;
+    }
+
+    function arrayBufferToBase64(buf) {
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    // Prompt with few-shot and strict rules
+    function buildPrompt(kind) {
+      const base = `You are a meticulous extractor for maritime Statement of Facts (SoF).\n` +
+        `Goal: Return a JSON array of events with EXACT fields: date, startTime, endTime, description.\n` +
+        `Rules:\n` +
+        `- Read line by line in order; do NOT merge multiple events.\n` +
+        `- If only one time is present, copy it to both startTime and endTime.\n` +
+        `- Normalize time to HH:MM (24h). Examples: 930→09:30, 9.30→09:30, 0930HRS→09:30.\n` +
+        `- Dates may appear once as a header for several following lines. Propagate the most recent explicit date until a new one is found.\n` +
+        `- If a date/time is unreadable or says "AS PER CHARTER PARTY" (any case), use "N/A". Do NOT infer missing values.\n` +
+        `- Keep description exactly as written (trim extra spaces).\n` +
+        `- Output only JSON (no markdown).`;
+
+      const fewshot = `\nFew-shot examples (format varies across ports):\n` +
+        `1) \"15.06.2024 0930-1015 Pilot on board.\" → {"date":"15.06.2024","startTime":"09:30","endTime":"10:15","description":"Pilot on board."}\n` +
+        `2) \"16/06/24 0900 Commenced loading.\" → {"date":"16/06/24","startTime":"09:00","endTime":"09:00","description":"Commenced loading."}\n` +
+        `3) \"AS PER CHARTER PARTY NOR tendered.\" → {"date":"N/A","startTime":"N/A","endTime":"N/A","description":"AS PER CHARTER PARTY NOR tendered."}\n` +
+        `4) \"17 Jun 2024 23:00-00:30 Shifted berth.\" → {"date":"17 Jun 2024","startTime":"23:00","endTime":"00:30","description":"Shifted berth."}`;
+
+      const kindHint = kind === 'text' ? `\nInput below is extracted TEXT of the SoF pages.` : `\nInput below are page IMAGES of the SoF.`;
+
+      return base + (document.getElementById('use-fewshot').checked ? fewshot : '') + kindHint + `\nReturn JSON array only.`;
+    }
+
+    async function callGemini(apiKey, parts) {
+      const eventSchema = {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            date: { type: "STRING" },
+            startTime: { type: "STRING" },
+            endTime: { type: "STRING" },
+            description: { type: "STRING" }
+          },
+          required: ["date", "startTime", "endTime", "description"]
+        }
+      };
+
+      const payload = {
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          ...(strictJson.checked ? { responseSchema: eventSchema } : {}),
+          ...(temperatureZero.checked ? { temperature: 0 } : {})
+        }
+      };
+
+      const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+      const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        let detail = await safeJson(res);
+        throw new Error(`Gemini error ${res.status}: ${detail?.error?.message || res.statusText}`);
+      }
+      const result = await res.json();
+      const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!text) throw new Error('Empty response from model');
+      // Resilient JSON parse (strip fences, etc.)
+      const clean = text.trim().replace(/^```json\s*|```$/g, '');
+      let parsed;
+      try { parsed = JSON.parse(clean); }
+      catch (e) { throw new Error('Model returned invalid JSON'); }
+      if (!Array.isArray(parsed)) throw new Error('Model did not return an array');
+      return parsed;
+    }
+
+    async function safeJson(res) { try { return await res.json(); } catch { return null; } }
+
+    // Post-processing: normalize, enforce rules, dedupe
+    function postProcess(arr) {
+      if (!Array.isArray(arr)) return [];
+      const norm = arr.map(raw => {
+        const description = (raw.description || '').toString().trim();
+        const cp = /as\s*per\s*charter\s*party/i.test(description);
+        let date = cp ? 'N/A' : normalizeDate(raw.date);
+        let s = cp ? 'N/A' : normalizeTime(raw.startTime);
+        let e = cp ? 'N/A' : normalizeTime(raw.endTime);
+
+        // If only one time effectively present
+        if (!s && e) s = e; if (!e && s) e = s;
+        if (!s) s = 'N/A'; if (!e) e = 'N/A'; if (!date) date = 'N/A';
+
+        // Basic sanity: if both times exist and obviously swapped (e.g., end earlier but not across midnight), keep as-is per non-inference policy
+        return { date, startTime: s, endTime: e, description };
+      });
+
+      // Dedupe
+      const seen = new Set();
+      const out = [];
+      for (const ev of norm) {
+        const key = `${ev.date}|${ev.startTime}|${ev.endTime}|${ev.description}`;
+        if (!seen.has(key)) { seen.add(key); out.push(ev); }
+      }
+      return out;
+    }
+
+    function normalizeDate(str) {
+      if (!str) return '';
+      const s = String(str).trim();
+      // Accept as-is but trim; optional canonicalization could be added here if desired
+      return s;
+    }
+
+    function normalizeTime(str) {
+      if (!str) return '';
+      let s = String(str).trim().toUpperCase().replace(/HRS?\.?$/, '').trim();
+      s = s.replace(/\s/g, '');
+      // 0930, 930 → 09:30
+      let m = s.match(/^(\d{3,4})$/);
+      if (m) {
+        const digits = m[1].padStart(4, '0');
+        const hh = digits.slice(0, 2), mm = digits.slice(2);
+        if (Number(hh) < 24 && Number(mm) < 60) return `${hh}:${mm}`;
+      }
+      // 9:30, 09:30, 9.30, 09.30
+      m = s.match(/^(\d{1,2})[:.](\d{2})$/);
+      if (m) {
+        const hh = m[1].padStart(2, '0');
+        const mm = m[2];
+        if (Number(hh) < 24 && Number(mm) < 60) return `${hh}:${mm}`;
+      }
+      // Already looks like HH:MM
+      m = s.match(/^(\d{2}):(\d{2})$/);
+      if (m) return s;
+      return '';
+    }
+
+    function displayResults(list) {
+      resultsTableBody.innerHTML = '';
+      if (!list || list.length === 0) {
+        resultsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-slate-400">No events extracted.</td></tr>';
+        return;
+      }
+      for (const ev of list) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="px-6 py-3 text-sm text-slate-300">${escapeHtml(ev.date || 'N/A')}</td>
+          <td class="px-6 py-3 text-sm text-slate-300">${escapeHtml(ev.startTime || 'N/A')}</td>
+          <td class="px-6 py-3 text-sm text-slate-300">${escapeHtml(ev.endTime || 'N/A')}</td>
+          <td class="px-6 py-3 text-sm text-slate-300">${escapeHtml(ev.description || 'N/A')}</td>`;
+        resultsTableBody.appendChild(tr);
+      }
+    }
+
+    function toCSV(rows) {
+      const header = 'date,startTime,endTime,description\n';
+      const esc = v => '"' + (v ? String(v).replace(/"/g, '""') : '') + '"';
+      const body = rows.map(r => [esc(r.date), esc(r.startTime), esc(r.endTime), esc(r.description)].join(',')).join('\n');
+      return header + body;
+    }
+
+    function downloadFile(filename, content, mimeType) {
+      const a = document.createElement('a');
+      const blob = new Blob([content], { type: mimeType });
+      a.href = URL.createObjectURL(blob);
+      a.download = filename; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>\"]/, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));    }
+  </script>
+</body>
+</html>
